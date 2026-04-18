@@ -119,6 +119,7 @@ class AdminDfsPickingListController extends ModuleAdminController
             'has_filter'     => $filters['has_filter'],
             'controller_url' => $controllerUrl,
             'today'          => date('Y-m-d'),
+            'token'          => Tools::getAdminTokenLite('AdminDfsPickingList'),
         ]);
 
         $templatePath = _PS_MODULE_DIR_ . 'dfs_pickinglist/views/templates/admin/picking_list.tpl';
@@ -136,10 +137,14 @@ class AdminDfsPickingListController extends ModuleAdminController
     /**
      * Parse et valide les filtres depuis la requête HTTP.
      *
+     * Filtre principal : formulaire GET (pas de token POST requis)
+     * Exports : formulaires POST séparés (token dans l'URL de l'action)
+     *
+     * Tools::getValue() lit GET puis POST — compatible avec les deux.
+     *
      * Évolution v1.1 :
      * - Ajout du filtre multi-états (picking_states[])
      * - has_filter = true si AU MOINS UN critère est renseigné
-     *   (mode OU date OU état — combinaisons libres)
      */
     private function getFilters(): array
     {

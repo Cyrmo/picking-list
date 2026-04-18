@@ -276,8 +276,8 @@ select[name="picking_states[]"] option:checked {
 <div class="dfspl-filter-panel">
     <p class="panel-title">🔍 Filtres de recherche</p>
 
-    <form method="post" action="{$controller_url|escape:'html'}">
-        <input type="hidden" name="token" value="{Tools::getAdminTokenLite('AdminDfsPickingList')|escape:'html'}">
+    <form method="get" action="{$controller_url|escape:'html'}">
+        {* Token PS9 déjà inclus dans controller_url via getAdminLink(true) *}
 
         {* ---- Ligne 1 : Mode de livraison + Dates ---- *}
         <p class="dfspl-filter-row-label">Mode &amp; Date</p>
@@ -355,13 +355,44 @@ select[name="picking_states[]"] option:checked {
             Sélectionnez au moins un critère (mode, date ou état) pour lancer la recherche.
         </p>
 
-        {* ---- Barre d'export (si résultats) ---- *}
+        {* ---- Barre d'export (formulaires POST séparés du filtre GET) ---- *}
         {if $has_results}
-            <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eee; display: flex; gap: 10px; align-items: center;">
+            <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eee; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                 <span style="font-size: 12px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px;">Exporter :</span>
-                <button type="submit" name="export_csv" class="dfspl-btn dfspl-btn-success">📄 CSV</button>
-                <button type="submit" name="export_xlsx" class="dfspl-btn dfspl-btn-info">📊 Excel (XLSX)</button>
-                <button type="submit" name="export_pdf" class="dfspl-btn dfspl-btn-danger">📋 PDF</button>
+
+                {* Export CSV *}
+                <form method="post" action="{$controller_url|escape:'html'}" style="margin:0;">
+                    <input type="hidden" name="picking_mode" value="{$filters.mode|escape:'html'}">
+                    <input type="hidden" name="picking_date_from" value="{$filters.date_from|escape:'html'}">
+                    <input type="hidden" name="picking_date_to" value="{$filters.date_to|escape:'html'}">
+                    {foreach from=$filters.states item=sid}
+                        <input type="hidden" name="picking_states[]" value="{$sid|intval}">
+                    {/foreach}
+                    <button type="submit" name="export_csv" value="1" class="dfspl-btn dfspl-btn-success">📄 CSV</button>
+                </form>
+
+                {* Export XLSX *}
+                <form method="post" action="{$controller_url|escape:'html'}" style="margin:0;">
+                    <input type="hidden" name="picking_mode" value="{$filters.mode|escape:'html'}">
+                    <input type="hidden" name="picking_date_from" value="{$filters.date_from|escape:'html'}">
+                    <input type="hidden" name="picking_date_to" value="{$filters.date_to|escape:'html'}">
+                    {foreach from=$filters.states item=sid}
+                        <input type="hidden" name="picking_states[]" value="{$sid|intval}">
+                    {/foreach}
+                    <button type="submit" name="export_xlsx" value="1" class="dfspl-btn dfspl-btn-info">📊 Excel (XLSX)</button>
+                </form>
+
+                {* Export PDF *}
+                <form method="post" action="{$controller_url|escape:'html'}" style="margin:0;">
+                    <input type="hidden" name="picking_mode" value="{$filters.mode|escape:'html'}">
+                    <input type="hidden" name="picking_date_from" value="{$filters.date_from|escape:'html'}">
+                    <input type="hidden" name="picking_date_to" value="{$filters.date_to|escape:'html'}">
+                    {foreach from=$filters.states item=sid}
+                        <input type="hidden" name="picking_states[]" value="{$sid|intval}">
+                    {/foreach}
+                    <button type="submit" name="export_pdf" value="1" class="dfspl-btn dfspl-btn-danger">📋 PDF</button>
+                </form>
+
             </div>
         {/if}
 
