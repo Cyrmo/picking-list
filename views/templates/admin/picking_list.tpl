@@ -247,7 +247,7 @@ select[name="picking_states[]"] option:checked {
 .dfspl-orders-list { font-family: monospace; font-size: 12px; color: #555; max-width: 300px; word-break: break-all; }
 .dfspl-orders-links { font-family: monospace; font-size: 12px; max-width: 340px; line-height: 1.5; }
 .dfspl-order-link { color: #0f3460; font-weight: 600; text-decoration: none; padding: 2px 4px; border-radius: 4px; transition: all 0.2s; background: #e8ecf3; display: inline-block; margin-bottom: 3px; }
-.dfspl-order-link:hover { background: #0f3460; color: #fff; text-decoration: none; }
+.dfspl-order-link:hover { background: #0f3460 !important; color: #ffffff !important; text-decoration: none !important; }
 .dfspl-truncated-warning { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #c0392b; font-style: italic; }
 
 .dfspl-date-badge { background: #e8f5e9; color: #1e8449; padding: 3px 10px; border-radius: 12px; font-weight: 600; font-size: 12px; white-space: nowrap; }
