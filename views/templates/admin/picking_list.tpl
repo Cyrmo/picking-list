@@ -276,8 +276,10 @@ select[name="picking_states[]"] option:checked {
 <div class="dfspl-filter-panel">
     <p class="panel-title">🔍 Filtres de recherche</p>
 
-    <form method="get" action="{$controller_url|escape:'html'}">
-        {* Token PS9 déjà inclus dans controller_url via getAdminLink(true) *}
+    <form method="get" action="index.php">
+        <input type="hidden" name="controller" value="AdminDfsPickingList">
+        <input type="hidden" name="token" value="{$token|escape:'html'}">
+        <input type="hidden" name="submit_filter" value="1">
 
         {* ---- Ligne 1 : Mode de livraison + Dates ---- *}
         <p class="dfspl-filter-row-label">Mode &amp; Date</p>
@@ -350,9 +352,9 @@ select[name="picking_states[]"] option:checked {
 
         {* ---- Note d'aide sous le multi-select ---- *}
         <p style="font-size:11px; color:#999; margin: 8px 0 0; font-style:italic;">
-            💡 Aucune sélection = commandes en cours uniquement.
-            Sélectionnez un ou plusieurs états pour filtrer précisément.
-            Sélectionnez au moins un critère (mode, date ou état) pour lancer la recherche.
+            💡 Aucune sélection d'état = commandes en cours uniquement.
+            Sélectionnez un ou plusieurs états de commande pour filtrer précisément.<br>
+            Si aucun mode de livraison ni date n'est sélectionné, l'affichage comportera la totalité des commandes en cours.
         </p>
 
         {* ---- Barre d'export (formulaires POST séparés du filtre GET) ---- *}
@@ -403,14 +405,7 @@ select[name="picking_states[]"] option:checked {
    RÉSULTATS
    ============================================================ *}
 
-{if !$has_filter}
-    {* Aucun critère sélectionné *}
-    <div class="dfspl-placeholder">
-        <div class="dfspl-placeholder-icon">🗂</div>
-        <p>Sélectionnez un mode de livraison et/ou une date pour afficher la picking list.</p>
-    </div>
-
-{elseif $has_filter && !$has_results}
+{if !$has_results}
     <div class="dfspl-results-panel">
         <div class="dfspl-empty-state">
             <div class="dfspl-empty-icon">📭</div>

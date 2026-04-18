@@ -180,11 +180,13 @@ class AdminDfsPickingListController extends ModuleAdminController
         }
         $states = array_values(array_filter(array_map('intval', $rawStates)));
 
-        // --- Logique mode OU : au moins un critère ---
+        // --- Exécution automatique ---
+        // Le client souhaite que la requête s'exécute toujours nativement pour
+        // afficher la totalité des commandes en cours à l'ouverture de la page.
         $hasMode   = !empty($rawMode) && !empty($type);
         $hasDate   = !empty($dateFrom);
         $hasStates = !empty($states);
-        $hasFilter = $hasMode || $hasDate || $hasStates;
+        $hasFilter = true;
 
         return [
             // Mode de livraison
