@@ -135,9 +135,9 @@ class PickingDataService
                     ELSE COALESCE(c.`name`, \'[Transporteur supprimé]\')
                 END AS carrier_label,
 
-                -- Commandes associées
+                -- Commandes associées (ID et Référence pour pouvoir générer les liens)
                 GROUP_CONCAT(
-                    DISTINCT o.reference
+                    DISTINCT CONCAT(o.id_order, \':\', o.reference)
                     ORDER BY o.reference ASC
                     SEPARATOR \'; \'
                 ) AS orders_list,
@@ -192,10 +192,42 @@ class PickingDataService
             $rows = [];
         }
 
-        // Détection troncature GROUP_CONCAT côté PHP
+        // Traitement des données récupérées (création des URLs de commandes)
         foreach ($rows as &$row) {
-            $trimmed = rtrim((string) ($row['orders_list'] ?? ''));
-            $row['orders_list_truncated'] = str_ends_with($trimmed, ';');
+            $rawList = (string) ($row['orders_list'] ?? '');
+            $trimmed = rtrim($rawList, '; ');
+            $row['orders_list_truncated'] = str_ends_with($rawList, ';');
+
+            $ordersLinks = [];
+            $ordersText  = [];
+
+            if ($trimmed !== '') {
+                $pairs = explode('; ', $trimmed);
+                foreach ($pairs as $pair) {
+                    $parts = explode(':', $pair, 2);
+                    if (count($parts) === 2) {
+                        $idOrder = (int) $parts[0];
+                        $ref     = $parts[1];
+                        $ordersText[] = $ref;
+                        $ordersLinks[] = [
+                            'ref' => $ref,
+                            'url' => $this->context->link->getAdminLink('AdminOrders', true, [], [
+                                'id_order'  => $idOrder,
+                                'vieworder' => 1
+                            ])
+                        ];
+                    } else {
+                        // Cas exceptionnel (ex: troncature au milieu du GROUP_CONCAT)
+                        $cleanRef = preg_replace('/^\d+:/', '', $pair);
+                        $ordersText[] = $cleanRef;
+                    }
+                }
+            }
+
+            // On réécrit orders_list en texte brut "REF1; REF2" (pour exports CSV/XLSX/PDF)
+            $row['orders_list'] = implode('; ', $ordersText);
+            // On fournit les données avec liens pour le template Smarty (BO)
+            $row['orders_links_data'] = $ordersLinks;
         }
         unset($row);
 

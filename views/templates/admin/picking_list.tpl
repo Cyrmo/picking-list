@@ -245,6 +245,9 @@ select[name="picking_states[]"] option:checked {
 .dfspl-carrier-cc::before { content: '📍'; font-size: 12px; }
 
 .dfspl-orders-list { font-family: monospace; font-size: 12px; color: #555; max-width: 300px; word-break: break-all; }
+.dfspl-orders-links { font-family: monospace; font-size: 12px; max-width: 340px; line-height: 1.5; }
+.dfspl-order-link { color: #0f3460; font-weight: 600; text-decoration: none; padding: 2px 4px; border-radius: 4px; transition: all 0.2s; background: #e8ecf3; display: inline-block; margin-bottom: 3px; }
+.dfspl-order-link:hover { background: #0f3460; color: #fff; text-decoration: none; }
 .dfspl-truncated-warning { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #c0392b; font-style: italic; }
 
 .dfspl-date-badge { background: #e8f5e9; color: #1e8449; padding: 3px 10px; border-radius: 12px; font-weight: 600; font-size: 12px; white-space: nowrap; }
@@ -469,7 +472,18 @@ select[name="picking_states[]"] option:checked {
                             {/if}
 
                             <td>
-                                <span class="dfspl-orders-list">{$row.orders_list|escape:'html'}</span>
+                                {if isset($row.orders_links_data) && $row.orders_links_data|@count > 0}
+                                    <div class="dfspl-orders-links">
+                                        {foreach from=$row.orders_links_data item=linkData name=olinks}
+                                            <a href="{$linkData.url|escape:'html'}" target="_blank" class="dfspl-order-link" title="Ouvrir la commande dans un nouvel onglet">
+                                                {$linkData.ref|escape:'html'}
+                                            </a>{if !$smarty.foreach.olinks.last}; {/if}
+                                        {/foreach}
+                                    </div>
+                                {else}
+                                    <span class="dfspl-orders-list">{$row.orders_list|escape:'html'}</span>
+                                {/if}
+
                                 {if isset($row.orders_list_truncated) && $row.orders_list_truncated}
                                     <br>
                                     <span class="dfspl-truncated-warning">
