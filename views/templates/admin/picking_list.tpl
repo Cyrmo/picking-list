@@ -306,8 +306,7 @@ select[name="picking_states[]"] option:checked {
                 <input type="date"
                     name="picking_date_from"
                     id="picking_date_from"
-                    value="{$filters.date_from|escape:'html'}"
-                    max="{$today|escape:'html'}">
+                    value="{$filters.date_from|escape:'html'}">
             </div>
 
             <div class="dfspl-form-group">
@@ -315,8 +314,7 @@ select[name="picking_states[]"] option:checked {
                 <input type="date"
                     name="picking_date_to"
                     id="picking_date_to"
-                    value="{$filters.date_to|escape:'html'}"
-                    max="{$today|escape:'html'}">
+                    value="{$filters.date_to|escape:'html'}">
             </div>
 
         </div>
