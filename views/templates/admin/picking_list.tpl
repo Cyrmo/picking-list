@@ -497,5 +497,111 @@ select[name="picking_states[]"] option:checked {
             </table>
         </div>
 
+        {* ---- Bar de pagination ---- *}
+        <div class="dfspl-pagination-bar" style="display:flex; justify-content:space-between; align-items:center; padding:14px 20px; background:#f8f9fc; border-top:1px solid #e0e4ea;">
+            <div class="dfspl-pagination-info" style="font-size:12px; color:#555;">
+                Affichage <strong id="dfspl-page-start">1</strong> à <strong id="dfspl-page-end">50</strong> sur <strong><span id="dfspl-page-total">{$rows|count}</span></strong>
+            </div>
+            <div class="dfspl-pagination-controls" style="display:flex; gap:10px; align-items:center;">
+                <label style="font-size:12px; margin:0; color:#555; text-transform:uppercase; font-weight:600;">Lignes par page :</label>
+                <select id="dfspl-per-page" style="height:32px; border:1px solid #ced4da; border-radius:4px; font-size:12px; padding:0 8px; cursor:pointer;">
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="300">300</option>
+                    <option value="all">Toutes</option>
+                </select>
+                <div style="display:flex; gap:6px; margin-left:10px;">
+                    <button class="dfspl-btn" id="dfspl-btn-prev" style="padding:6px 12px; font-size:12px; background:#fff; border:1px solid #ced4da; color:#333;">◀ Précédent</button>
+                    <button class="dfspl-btn" id="dfspl-btn-next" style="padding:6px 12px; font-size:12px; background:#fff; border:1px solid #ced4da; color:#333;">Suivant ▶</button>
+                </div>
+            </div>
+        </div>
+
     </div>
 {/if}
+
+<script>
+{literal}
+document.addEventListener("DOMContentLoaded", function() {
+    const tbody = document.querySelector('.dfspl-table tbody');
+    if (!tbody) return;
+    
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const totalRows = rows.length;
+    
+    // S'il n'y a pas de lignes, pas besoin de pagination
+    if (totalRows === 0) return;
+    
+    let currentPage = 1;
+    let perPage = 50;
+    
+    const perPageSelect = document.getElementById('dfspl-per-page');
+    const btnPrev = document.getElementById('dfspl-btn-prev');
+    const btnNext = document.getElementById('dfspl-btn-next');
+    const elStart = document.getElementById('dfspl-page-start');
+    const elEnd = document.getElementById('dfspl-page-end');
+    const elTotal = document.getElementById('dfspl-page-total');
+    
+    if (!perPageSelect || !btnPrev || !btnNext) return;
+    
+    function renderTable() {
+        let start = (currentPage - 1) * perPage;
+        let end = start + perPage;
+        
+        if (perPage === 'all') {
+            start = 0;
+            end = totalRows;
+        }
+        
+        rows.forEach((row, index) => {
+            if (index >= start && index < end) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+        
+        elStart.textContent = start + 1;
+        elEnd.textContent = Math.min(end, totalRows);
+        
+        // Gestion des états des boutons
+        btnPrev.disabled = currentPage === 1 || perPage === 'all';
+        btnNext.disabled = end >= totalRows || perPage === 'all';
+        
+        btnPrev.style.opacity = btnPrev.disabled ? '0.4' : '1';
+        btnNext.style.opacity = btnNext.disabled ? '0.4' : '1';
+        btnPrev.style.cursor = btnPrev.disabled ? 'not-allowed' : 'pointer';
+        btnNext.style.cursor = btnNext.disabled ? 'not-allowed' : 'pointer';
+    }
+    
+    perPageSelect.addEventListener('change', function() {
+        const val = this.value;
+        perPage = val === 'all' ? 'all' : parseInt(val, 10);
+        currentPage = 1;
+        renderTable();
+    });
+    
+    btnPrev.addEventListener('click', function(e) {
+        e.preventDefault();
+        if (currentPage > 1) {
+            currentPage--;
+            renderTable();
+        }
+    });
+    
+    btnNext.addEventListener('click', function(e) {
+        e.preventDefault();
+        if (perPage !== 'all') {
+            let maxPage = Math.ceil(totalRows / perPage);
+            if (currentPage < maxPage) {
+                currentPage++;
+                renderTable();
+            }
+        }
+    });
+    
+    // Initialisation
+    renderTable();
+});
+{/literal}
+</script>
