@@ -2,11 +2,12 @@
 /**
  * DFS Picking List — Service de données
  *
- * Construit et exécute la requête SQL principale pour la picking list.
- * Intègre les deux sources de dates métier :
- *   - DFS Click & Collect (priorité 1) : dfs_clickcollect_creneau.day
- *   - DFS Delivery Date (priorité 2)   : dfs_delivery_order.delivery_date
- *   - Fallback (priorité 3)            : orders.date_add
+ * v1.1.0 — Filtre état de commande + clauses mode/date conditionnelles
+ *
+ * Priorité des dates (inchangée) :
+ *   1. dfs_clickcollect_creneau.day
+ *   2. dfs_delivery_order.delivery_date
+ *   3. orders.date_add (fallback)
  *
  * @author    Cyrille Mohr - Digital Food System <contact@digitaifoodsystem.com>
  * @copyright 2024-2026 Digital Food System
@@ -36,30 +37,76 @@ class PickingDataService
     // -------------------------------------------------------------------------
 
     /**
-     * Retourne les données agrégées de picking selon les filtres fournis.
+     * Retourne les données agrégées selon les filtres.
      *
-     * @param array $filters Filtres validés (mode, type, value, date_from, date_to, is_range)
+     * v1.1 : mode et date deviennent optionnels (mode OU, pas ET).
+     * L'état de commande est toujours appliqué (défaut = commandes en cours).
+     *
+     * @param array $filters Filtres validés par le contrôleur
      *
      * @return array{rows: array, show_date_col: bool}
      */
     public function getPickingData(array $filters): array
     {
-        if (empty($filters['mode']) || empty($filters['date_from'])) {
+        // Sécurité : ne jamais exécuter sans au moins un critère
+        if (empty($filters['has_filter'])) {
             return ['rows' => [], 'show_date_col' => false];
         }
 
         $idLang  = (int) Configuration::get('PS_LANG_DEFAULT');
         $idShops = $this->getShopIds();
-        $isRange = (bool) $filters['is_range'];
+        $isRange = (bool) ($filters['is_range'] ?? false);
 
-        // Élargissement GROUP_CONCAT — protection anti-troncature (1 Mo par valeur)
+        // Protection GROUP_CONCAT (anti-troncature)
         $this->db->execute('SET SESSION group_concat_max_len = 1048576');
 
-        // Construction des clauses WHERE
-        $modeWhere = $this->buildModeWhere($filters);
-        $dateWhere = $this->buildDateWhere($filters['date_from'], $filters['date_to']);
+        // ---------------------------------------------------------------
+        // Construction des clauses WHERE conditionnelles
+        // ---------------------------------------------------------------
 
-        // GROUP BY : ajout de picking_date uniquement en mode plage multi-jours
+        // 1. État de commande (toujours présent)
+        $stateWhere = $this->buildStateWhere($filters);
+
+        // 2. Boutiques (toujours présent)
+        $shopWhere = 'o.id_shop IN (' . implode(',', array_map('intval', $idShops)) . ')';
+
+        // 3. Produits non annulés (toujours présent)
+        $qtyWhere = 'od.product_quantity > 0';
+
+        // 4. Mode de livraison (conditionnel)
+        $modeWhere = '';
+        if (!empty($filters['has_mode'])) {
+            $modeWhere = $this->buildModeWhere($filters);
+        }
+
+        // 5. Date (conditionnelle)
+        $dateWhere = '';
+        if (!empty($filters['has_date'])) {
+            $dateWhere = $this->buildDateWhere($filters['date_from'], $filters['date_to']);
+        }
+
+        // ---------------------------------------------------------------
+        // Assemblage du WHERE final
+        // ---------------------------------------------------------------
+        $whereParts = [
+            $stateWhere,
+            $shopWhere,
+            $qtyWhere,
+        ];
+
+        if ($modeWhere) {
+            $whereParts[] = '(' . $modeWhere . ')';
+        }
+
+        if ($dateWhere) {
+            $whereParts[] = '(' . $dateWhere . ')';
+        }
+
+        $where = implode("\n                AND ", $whereParts);
+
+        // ---------------------------------------------------------------
+        // GROUP BY / ORDER BY
+        // ---------------------------------------------------------------
         $groupBy = 'od.product_id, od.product_attribute_id, carrier_label';
         if ($isRange) {
             $groupBy .= ', picking_date';
@@ -67,6 +114,9 @@ class PickingDataService
 
         $orderBy = 'od.product_name ASC' . ($isRange ? ', picking_date ASC' : '');
 
+        // ---------------------------------------------------------------
+        // Requête principale
+        // ---------------------------------------------------------------
         $sql = '
             SELECT
                 od.product_id,
@@ -74,7 +124,7 @@ class PickingDataService
                 od.product_name,
                 SUM(od.product_quantity) AS total_qty,
 
-                -- Label enrichi : "Retrait en boutique — Lieu" ou nom du transporteur
+                -- Label enrichi
                 CASE
                     WHEN cr.id_store IS NOT NULL
                         THEN CONCAT(
@@ -85,14 +135,14 @@ class PickingDataService
                     ELSE COALESCE(c.`name`, \'[Transporteur supprimé]\')
                 END AS carrier_label,
 
-                -- Commandes associées (séparées par "; ")
+                -- Commandes associées
                 GROUP_CONCAT(
                     DISTINCT o.reference
                     ORDER BY o.reference ASC
                     SEPARATOR \'; \'
                 ) AS orders_list,
 
-                -- Date picking unifiée (uniquement dans SELECT, jamais dans WHERE)
+                -- Date picking unifiée (COALESCE dans SELECT uniquement → index préservé)
                 COALESCE(
                     NULLIF(cr.`day`, \'0000-00-00\'),
                     NULLIF(dd.delivery_date, \'0000-00-00\'),
@@ -107,7 +157,7 @@ class PickingDataService
             LEFT JOIN `' . _DB_PREFIX_ . 'carrier` c
                 ON c.id_carrier = o.id_carrier
 
-            -- Anti-duplication : 1 créneau C&C maximum par commande (le plus récent)
+            -- Anti-duplication : 1 créneau C&C par commande (le plus récent)
             LEFT JOIN (
                 SELECT cr_inner.id_order, cr_inner.id_store, cr_inner.`day`, cr_inner.`hour`
                 FROM `' . _DB_PREFIX_ . 'dfs_clickcollect_creneau` cr_inner
@@ -120,30 +170,17 @@ class PickingDataService
                     AND latest.latest_id = cr_inner.id_creneau
             ) cr ON cr.id_order = o.id_order
 
-            -- Nom du lieu de retrait (depuis table PS store_lang)
+            -- Nom du lieu de retrait
             LEFT JOIN `' . _DB_PREFIX_ . 'store_lang` sl
                 ON sl.id_store = cr.id_store
                 AND sl.id_lang = ' . $idLang . '
 
-            -- Date de livraison (DFS Delivery Date)
+            -- DFS Delivery Date
             LEFT JOIN `' . _DB_PREFIX_ . 'dfs_delivery_order` dd
                 ON dd.id_order = o.id_order
 
             WHERE
-                -- États exclus (via constantes PS — aucun entier codé en dur)
-                o.current_state NOT IN (' . $this->buildExcludedStatesClause() . ')
-
-                -- Filtre boutique (multiboutique respecté)
-                AND o.id_shop IN (' . implode(',', array_map('intval', $idShops)) . ')
-
-                -- Produits annulés exclus
-                AND od.product_quantity > 0
-
-                -- Filtre mode de livraison (carrier:X ou clickcollect:Y)
-                AND (' . $modeWhere . ')
-
-                -- Filtre date (branching OR sans COALESCE dans le WHERE = index-friendly)
-                AND (' . $dateWhere . ')
+                ' . $where . '
 
             GROUP BY ' . $groupBy . '
             ORDER BY ' . $orderBy . '
@@ -155,7 +192,7 @@ class PickingDataService
             $rows = [];
         }
 
-        // Validation PHP anti-troncature GROUP_CONCAT
+        // Détection troncature GROUP_CONCAT côté PHP
         foreach ($rows as &$row) {
             $trimmed = rtrim((string) ($row['orders_list'] ?? ''));
             $row['orders_list_truncated'] = str_ends_with($trimmed, ';');
@@ -163,7 +200,7 @@ class PickingDataService
         unset($row);
 
         return [
-            'rows'         => $rows,
+            'rows'          => $rows,
             'show_date_col' => $isRange,
         ];
     }
@@ -173,15 +210,54 @@ class PickingDataService
     // -------------------------------------------------------------------------
 
     /**
-     * Construit le prédicat SQL pour le filtre "mode de livraison".
+     * Filtre État de commande (v1.1).
      *
-     * Pour carrier:X  → exclut explicitement les commandes C&C (cr.id_order IS NULL)
-     * Pour clickcollect:Y → filtre sur le transporteur C&C ET le lieu précis
+     * Si l'utilisateur a sélectionné des états → IN (...)
+     * Sinon → comportement par défaut : exclure livré, remboursé, annulé, erreur
+     *          (= commandes "en cours")
+     */
+    private function buildStateWhere(array $filters): string
+    {
+        $states = $filters['states'] ?? [];
+
+        if (!empty($states)) {
+            // États explicitement sélectionnés (remplace entièrement le comportement par défaut)
+            return 'o.current_state IN (' . implode(',', array_map('intval', $states)) . ')';
+        }
+
+        // Comportement par défaut : commandes en cours uniquement
+        $excluded = array_filter([
+            (int) Configuration::get('PS_OS_DELIVERED'),
+            (int) Configuration::get('PS_OS_CANCELED'),
+            (int) Configuration::get('PS_OS_REFUND'),
+            (int) Configuration::get('PS_OS_ERROR'),
+        ]);
+
+        // États personnalisés éventuellement configurés dans le module
+        $custom = (string) Configuration::get('DFSPICKING_EXCLUDED_STATES');
+        if ($custom !== '') {
+            $customIds = array_filter(array_map('intval', explode(',', $custom)));
+            $excluded  = array_unique(array_merge($excluded, $customIds));
+        }
+
+        $excluded = array_values(array_filter($excluded));
+
+        return $excluded
+            ? 'o.current_state NOT IN (' . implode(',', $excluded) . ')'
+            : '1=1';
+    }
+
+    /**
+     * Filtre mode de livraison.
+     *
+     * carrier:X    → transporteur standard, C&C structurellement exclus
+     * clickcollect:Y → transporteur C&C + lieu de retrait précis
+     *
+     * Appelé uniquement si has_mode = true.
      */
     private function buildModeWhere(array $filters): string
     {
         if ($filters['type'] === 'carrier') {
-            // Transporteur standard — exclusion C&C structurelle
             return 'c.id_reference = ' . (int) $filters['value'] . '
                     AND cr.id_order IS NULL';
         }
@@ -189,25 +265,24 @@ class PickingDataService
         if ($filters['type'] === 'clickcollect') {
             $ccRef = $this->getClickCollectCarrierReference();
             if (!$ccRef) {
-                return '1=0'; // Sécurité : aucun transporteur C&C trouvé
+                return '1=0';
             }
             return 'c.id_reference = ' . (int) $ccRef . '
                     AND cr.id_store = ' . (int) $filters['value'];
         }
 
-        return '1=0'; // Filtre vide — ne doit pas arriver en pratique
+        return '1=0';
     }
 
     /**
-     * Construit le prédicat SQL pour le filtre date.
-     *
-     * Utilise 3 branches OR explicites (sans COALESCE dans le WHERE)
-     * pour préserver l'usage des indexes sur chaque colonne source.
+     * Filtre date — 3 branches OR index-friendly (sans COALESCE dans le WHERE).
      *
      * Priorité :
-     *   1. dfs_clickcollect_creneau.day (date retrait C&C)
-     *   2. dfs_delivery_order.delivery_date (date livraison)
-     *   3. orders.date_add (fallback — sans DATE() pour préserver l'index)
+     *   1. dfs_clickcollect_creneau.day
+     *   2. dfs_delivery_order.delivery_date
+     *   3. orders.date_add
+     *
+     * Appelé uniquement si has_date = true.
      */
     private function buildDateWhere(string $from, string $to): string
     {
@@ -215,20 +290,20 @@ class PickingDataService
         $to   = pSQL($to ?: $from);
 
         return "
-            /* Priorité 1 : créneau Click & Collect avec date valide */
+            /* Priorité 1 : créneau Click & Collect */
             (
                 cr.id_order IS NOT NULL
                 AND cr.`day` <> '0000-00-00'
                 AND cr.`day` BETWEEN '{$from}' AND '{$to}'
             )
-            /* Priorité 2 : pas de C&C (ou date invalide) + date livraison valide */
+            /* Priorité 2 : date de livraison DFS */
             OR (
                 (cr.id_order IS NULL OR cr.`day` = '0000-00-00')
                 AND dd.id_order IS NOT NULL
                 AND dd.delivery_date <> '0000-00-00'
                 AND dd.delivery_date BETWEEN '{$from}' AND '{$to}'
             )
-            /* Priorité 3 : fallback sur date de commande (sans DATE() = index utilisé) */
+            /* Priorité 3 : date de commande (sans DATE() → index utilisé) */
             OR (
                 (cr.id_order IS NULL OR cr.`day` = '0000-00-00')
                 AND (dd.id_order IS NULL OR dd.delivery_date = '0000-00-00')
@@ -242,38 +317,13 @@ class PickingDataService
     // -------------------------------------------------------------------------
 
     /**
-     * Construit la liste CSV des états exclus depuis les constantes PS
-     * (jamais d'entiers codés en dur).
-     */
-    private function buildExcludedStatesClause(): string
-    {
-        $states = array_filter([
-            (int) Configuration::get('PS_OS_CANCELED'),
-            (int) Configuration::get('PS_OS_REFUND'),
-            (int) Configuration::get('PS_OS_ERROR'),
-        ]);
-
-        $custom = (string) Configuration::get('DFSPICKING_EXCLUDED_STATES');
-        if ($custom !== '') {
-            $customIds = array_filter(array_map('intval', explode(',', $custom)));
-            $states    = array_unique(array_merge($states, $customIds));
-        }
-
-        $states = array_values(array_filter($states));
-
-        // Fallback : si aucune constante PS définie, exclure 0 (aucun état)
-        return $states ? implode(',', $states) : '0';
-    }
-
-    /**
-     * Détermine dynamiquement l'id_reference du transporteur DFS Click & Collect.
+     * Détermine l'id_reference du transporteur DFS Click & Collect.
      *
-     * Méthode 1 (principale) : détection par les commandes C&C existantes (toujours fiable)
-     * Méthode 2 (fallback)   : via table module_carrier (id_reference, pas id_carrier)
+     * Méthode 1 (principale) : commandes C&C existantes (toujours fiable)
+     * Méthode 2 (fallback)   : module_carrier PS (id_reference)
      */
     public function getClickCollectCarrierReference(): int
     {
-        // Méthode 1 : détection par les données historiques (principale car toujours remplie)
         $ref = (int) $this->db->getValue(
             'SELECT c.id_reference
              FROM `' . _DB_PREFIX_ . 'carrier` c
@@ -288,7 +338,6 @@ class PickingDataService
             return $ref;
         }
 
-        // Méthode 2 : via module_carrier PS (id_reference = colonne correcte, PAS id_carrier)
         $ref = (int) $this->db->getValue(
             'SELECT cm.id_reference
              FROM `' . _DB_PREFIX_ . 'module_carrier` cm

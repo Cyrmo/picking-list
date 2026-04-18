@@ -2,10 +2,7 @@
 /**
  * DFS Picking List — Contrôleur Back-Office
  *
- * Pattern de rendu identique à AdminDfsClickCollectController (module de référence) :
- * - initContent() avec parent call
- * - fetch du template dans $this->content
- * - assign 'content' => $this->content en fin d'initContent()
+ * v1.1.0 — état de commande + filtres mode OU
  *
  * @author    Cyrille Mohr - Digital Food System <contact@digitaifoodsystem.com>
  * @copyright 2024-2026 Digital Food System
@@ -28,8 +25,8 @@ class AdminDfsPickingListController extends ModuleAdminController
             $this->module = Module::getInstanceByName('dfs_pickinglist');
         }
 
-        $this->meta_title                 = 'Picking List';
-        $this->page_header_toolbar_title  = 'Picking List';
+        $this->meta_title                = 'Picking List';
+        $this->page_header_toolbar_title = 'Picking List';
     }
 
     public function initPageHeaderToolbar()
@@ -53,8 +50,8 @@ class AdminDfsPickingListController extends ModuleAdminController
         if ($isExport) {
             $filters = $this->getFilters();
 
-            if (empty($filters['mode']) || empty($filters['date_from'])) {
-                $this->errors[] = 'Veuillez sélectionner un mode de livraison et une date.';
+            if (!$filters['has_filter']) {
+                $this->errors[] = 'Veuillez sélectionner au moins un critère.';
                 return;
             }
 
@@ -76,7 +73,7 @@ class AdminDfsPickingListController extends ModuleAdminController
     }
 
     // -------------------------------------------------------------------------
-    // initContent — Rendu de la page (pattern identique à dfs_clickcollect)
+    // initContent — Rendu de la page (pattern dfs_clickcollect)
     // -------------------------------------------------------------------------
 
     public function initContent()
@@ -86,20 +83,22 @@ class AdminDfsPickingListController extends ModuleAdminController
         $idLang  = (int) Configuration::get('PS_LANG_DEFAULT');
         $idShops = $this->getShopIds();
 
-        // Construction des options de filtre (transporteurs + lieux C&C)
+        // Options du filtre "Mode de livraison"
         $enricher    = new CarrierEnricher();
         $modeOptions = $enricher->buildFilterOptions($idLang, $idShops);
 
-        // Récupération des filtres courants
+        // États de commande disponibles (pour le multi-select)
+        $orderStates = OrderState::getOrderStates($idLang);
+
+        // Filtres courants
         $filters = $this->getFilters();
 
-        // Récupération des données si un filtre est appliqué
+        // Données si au moins un filtre actif
         $rows        = [];
         $showDateCol = false;
         $hasResults  = false;
-        $hasFilter   = !empty($filters['mode']) && !empty($filters['date_from']);
 
-        if ($hasFilter) {
+        if ($filters['has_filter']) {
             $service = new PickingDataService($this->context);
             $result  = $service->getPickingData($filters);
 
@@ -108,25 +107,23 @@ class AdminDfsPickingListController extends ModuleAdminController
             $hasResults  = !empty($rows);
         }
 
-        // Lien du contrôleur (inclut token CSRF)
         $controllerUrl = $this->context->link->getAdminLink('AdminDfsPickingList');
 
         $this->context->smarty->assign([
             'mode_options'   => $modeOptions,
+            'order_states'   => $orderStates,
             'filters'        => $filters,
             'rows'           => $rows,
             'show_date_col'  => $showDateCol,
             'has_results'    => $hasResults,
-            'has_filter'     => $hasFilter,
+            'has_filter'     => $filters['has_filter'],
             'controller_url' => $controllerUrl,
             'today'          => date('Y-m-d'),
         ]);
 
-        // Fetch du template et injection dans $this->content
         $templatePath = _PS_MODULE_DIR_ . 'dfs_pickinglist/views/templates/admin/picking_list.tpl';
         $this->content .= $this->context->smarty->fetch($templatePath);
 
-        // CRITIQUE : assign 'content' pour que le layout PS9 l'affiche
         $this->context->smarty->assign([
             'content' => $this->content,
         ]);
@@ -137,43 +134,69 @@ class AdminDfsPickingListController extends ModuleAdminController
     // -------------------------------------------------------------------------
 
     /**
-     * Parse et valide les filtres depuis la requête HTTP (GET ou POST).
+     * Parse et valide les filtres depuis la requête HTTP.
+     *
+     * Évolution v1.1 :
+     * - Ajout du filtre multi-états (picking_states[])
+     * - has_filter = true si AU MOINS UN critère est renseigné
+     *   (mode OU date OU état — combinaisons libres)
      */
     private function getFilters(): array
     {
+        // --- Mode de livraison ---
         $rawMode  = (string) Tools::getValue('picking_mode', '');
-        $dateFrom = (string) Tools::getValue('picking_date_from', '');
-        $dateTo   = (string) Tools::getValue('picking_date_to', '');
-
-        // Validation format date ISO YYYY-MM-DD
-        $dateRegex = '/^\d{4}-\d{2}-\d{2}$/';
-        $dateFrom  = preg_match($dateRegex, $dateFrom) ? $dateFrom : '';
-        $dateTo    = preg_match($dateRegex, $dateTo)   ? $dateTo   : '';
-
-        // Si date_to absente → date unique (range = même jour)
-        if ($dateFrom && !$dateTo) {
-            $dateTo = $dateFrom;
-        }
-
-        // Parsing du mode : "carrier:7" ou "clickcollect:4"
-        $parts = explode(':', $rawMode, 2);
-        $type  = $parts[0] ?? '';
-        $value = isset($parts[1]) ? (int) $parts[1] : 0;
+        $parts    = explode(':', $rawMode, 2);
+        $type     = $parts[0] ?? '';
+        $value    = isset($parts[1]) ? (int) $parts[1] : 0;
 
         if (!in_array($type, ['carrier', 'clickcollect'], true)) {
             $type  = '';
             $value = 0;
         }
 
+        // --- Dates ---
+        $dateRegex = '/^\d{4}-\d{2}-\d{2}$/';
+        $dateFrom  = (string) Tools::getValue('picking_date_from', '');
+        $dateTo    = (string) Tools::getValue('picking_date_to', '');
+
+        $dateFrom = preg_match($dateRegex, $dateFrom) ? $dateFrom : '';
+        $dateTo   = preg_match($dateRegex, $dateTo)   ? $dateTo   : '';
+
+        if ($dateFrom && !$dateTo) {
+            $dateTo = $dateFrom;
+        }
+
         $isRange = $dateFrom && $dateTo && ($dateFrom !== $dateTo);
 
+        // --- États de commande (multi-select) ---
+        $rawStates = Tools::getValue('picking_states', []);
+        if (!is_array($rawStates)) {
+            $rawStates = [];
+        }
+        $states = array_values(array_filter(array_map('intval', $rawStates)));
+
+        // --- Logique mode OU : au moins un critère ---
+        $hasMode   = !empty($rawMode) && !empty($type);
+        $hasDate   = !empty($dateFrom);
+        $hasStates = !empty($states);
+        $hasFilter = $hasMode || $hasDate || $hasStates;
+
         return [
+            // Mode de livraison
             'mode'      => $rawMode,
             'type'      => $type,
             'value'     => $value,
+            // Dates
             'date_from' => $dateFrom,
             'date_to'   => $dateTo,
             'is_range'  => $isRange,
+            // États
+            'states'    => $states,
+            // Méta logique
+            'has_mode'   => $hasMode,
+            'has_date'   => $hasDate,
+            'has_states' => $hasStates,
+            'has_filter' => $hasFilter,
         ];
     }
 
